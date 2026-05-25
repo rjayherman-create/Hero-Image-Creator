@@ -1,8 +1,14 @@
 import "dotenv/config";
 import express from "express";
+import OpenAI from "openai";
 
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+  : null;
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -79,10 +85,40 @@ app.post("/api/generate-hero", async (req, res) => {
     });
   }
 
-  return res.status(501).json({
-    error:
-      "OPENAI_API_KEY is set, but the real image-generation adapter has not been enabled yet. Replace this block with your preferred OpenAI Images API call.",
-  });
+  try {
+    const result = await openai.images.generate({
+      model: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1",
+      prompt,
+      size: process.env.OPENAI_IMAGE_SIZE ?? "1536x1024",
+      quality: process.env.OPENAI_IMAGE_QUALITY ?? "medium",
+      n: 1,
+    });
+
+    const image = result.data?.[0];
+
+    if (image?.b64_json) {
+      return res.json({
+        imageUrl: `data:image/png;base64,${image.b64_json}`,
+        mode: "openai",
+      });
+    }
+
+    if (image?.url) {
+      return res.json({
+        imageUrl: image.url,
+        mode: "openai",
+      });
+    }
+
+    return res.status(502).json({
+      error: "OpenAI returned no image data.",
+    });
+  } catch (error) {
+    console.error("OpenAI image generation failed:", error);
+    return res.status(500).json({
+      error: "OpenAI image generation failed. Check your API key, model access, and billing status.",
+    });
+  }
 });
 
 app.listen(port, () => {
